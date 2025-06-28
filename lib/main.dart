@@ -34,6 +34,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Flutter Auto Review Demo',
       theme: ThemeData(
         // This is the theme of your application.
@@ -54,6 +55,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
+      home: Center(child: Text('Flutter Auto Review Demo')),
     );
   }
 }

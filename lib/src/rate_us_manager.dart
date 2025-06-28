@@ -25,7 +25,6 @@ class RateUsManager {
   static const String _keyCustomEvents = 'rate_us_custom_events';
   static const String _keyAutoTriggerCount = 'rate_us_auto_trigger_count';
   static const String _keyLastDismissTime = 'rate_us_last_dismiss_time';
-  static const String _keyHasRated = 'rate_us_has_rated';
   static const String _keyConfig = 'rate_us_config';
 
   /// The InAppReview instance used to request reviews
@@ -42,9 +41,6 @@ class RateUsManager {
 
   /// Whether the manager has been initialized
   bool _isInitialized = false;
-
-  /// Whether the app has been rated
-  bool get hasRated => _prefs.getBool(_keyHasRated) ?? false;
 
   /// Get the current configuration
   RateUsConfig get config => _config;
@@ -93,7 +89,6 @@ class RateUsManager {
     await _prefs.remove(_keyCustomEvents);
     await _prefs.remove(_keyAutoTriggerCount);
     await _prefs.remove(_keyLastDismissTime);
-    await _prefs.remove(_keyHasRated);
 
     debugPrint('RateUsManager reset');
   }
@@ -173,8 +168,8 @@ class RateUsManager {
       return false;
     }
 
-    // If the feature is disabled or the user has already rated, don't show
-    if (_config.rateUsInitialize != 1 || hasRated) {
+    // If the feature is disabled, don't show
+    if (_config.rateUsInitialize != 1) {
       return false;
     }
 
@@ -200,18 +195,12 @@ class RateUsManager {
       return;
     }
 
-    if (_config.rateUsInitialize != 1) {
-      debugPrint('RateUsManager is disabled');
-      return;
-    }
-
     try {
       final bool isAvailable = await inAppReview.isAvailable();
 
       if (isAvailable) {
         _analytics?.logDialogShown();
         await inAppReview.requestReview();
-        await _prefs.setBool(_keyHasRated, true);
         _analytics?.logRated();
       } else {
         _showFallbackDialog(context);
@@ -233,7 +222,6 @@ class RateUsManager {
 
     if (result == true) {
       await _openStoreListing();
-      await _prefs.setBool(_keyHasRated, true);
       _analytics?.logRated();
     } else {
       await _prefs.setInt(
@@ -281,11 +269,6 @@ class RateUsManager {
       return;
     }
 
-    if (_config.rateUsInitialize != 1) {
-      debugPrint('RateUsManager is disabled');
-      return;
-    }
-
     _analytics?.logTriggerCondition('settings');
     await showRateDialog(context);
   }
@@ -298,7 +281,7 @@ class RateUsManager {
       return;
     }
 
-    if (hasRated || !_hasCooldownPassed()) {
+    if (!_hasCooldownPassed()) {
       return;
     }
 
@@ -315,15 +298,22 @@ class RateUsManager {
     final int customEvents = _prefs.getInt(_keyCustomEvents) ?? 0;
     await _prefs.setInt(_keyCustomEvents, customEvents + 1);
 
+    // Modified to not require days since install check for custom events
     final bool shouldShow =
-        _shouldShowBasedOnCustomEvents() &&
-        await _shouldShowBasedOnDaysSinceInstall() &&
-        _hasCooldownPassed() &&
-        !hasRated;
+        _shouldShowBasedOnCustomEvents() && _hasCooldownPassed();
 
     if (shouldShow) {
       _analytics?.logTriggerCondition('custom_event');
     }
+
+    // Log the status
+    logCustomEventStatus(
+      customEvents: [customEvents.toString()],
+      shouldShow: shouldShow,
+      shouldShowBasedOnDaysSinceInstall: _shouldShowBasedOnDaysSinceInstall,
+      shouldShowBasedOnCustomEvents: () => _shouldShowBasedOnCustomEvents(),
+      hasCooldownPassed: () => _hasCooldownPassed(),
+    );
 
     return shouldShow;
   }
@@ -345,8 +335,7 @@ class RateUsManager {
     final bool shouldShow =
         _shouldShowBasedOnAutoTrigger() &&
         await _shouldShowBasedOnDaysSinceInstall() &&
-        _hasCooldownPassed() &&
-        !hasRated;
+        _hasCooldownPassed();
 
     if (shouldShow) {
       _analytics?.logTriggerCondition('auto_trigger');
@@ -362,9 +351,7 @@ class RateUsManager {
     }
 
     final bool shouldShow =
-        await _shouldShowBasedOnDaysSinceInstall() &&
-        _hasCooldownPassed() &&
-        !hasRated;
+        await _shouldShowBasedOnDaysSinceInstall() && _hasCooldownPassed();
 
     if (shouldShow) {
       _analytics?.logTriggerCondition('min_days_since_install');
@@ -382,8 +369,7 @@ class RateUsManager {
     final bool shouldShow =
         _shouldShowBasedOnAppOpens() &&
         await _shouldShowBasedOnDaysSinceInstall() &&
-        _hasCooldownPassed() &&
-        !hasRated;
+        _hasCooldownPassed();
 
     if (shouldShow) {
       _analytics?.logTriggerCondition('min_app_opens');
@@ -391,4 +377,34 @@ class RateUsManager {
 
     return shouldShow;
   }
+}
+
+void logCustomEventStatus({
+  required List<String> customEvents,
+  required bool shouldShow,
+  required Future<bool> Function() shouldShowBasedOnDaysSinceInstall,
+  required bool Function() shouldShowBasedOnCustomEvents,
+  required bool Function() hasCooldownPassed,
+}) async {
+  final now = DateTime.now();
+  final timestamp =
+      '${now.hour.toString().padLeft(2, '0')}:'
+      '${now.minute.toString().padLeft(2, '0')}:'
+      '${now.second.toString().padLeft(2, '0')}';
+
+  final log =
+      '''
+═══════════════════════════════════════════════════════════════════════════════
+ Log Time: $timestamp
+ Custom Events: $customEvents
+⭐ Should Show 'Rate Us': $shouldShow
+
+ Conditions:
+ - Based on Custom Events      : ${shouldShowBasedOnCustomEvents()}
+ - Based on Days Since Install : ${await shouldShowBasedOnDaysSinceInstall()}
+ - Has Cooldown Passed         : ${hasCooldownPassed()}
+═══════════════════════════════════════════════════════════════════════════════
+''';
+
+  debugPrint(log, wrapWidth: 100);
 }
