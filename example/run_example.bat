@@ -1,0 +1,3 @@
+@echo off
+echo Running Flutter Auto Review Example...
+flutter run 
