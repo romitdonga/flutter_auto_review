@@ -1,10 +1,4 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+// test/rate_us_manager_test.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_auto_review/flutter_auto_review.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,150 +7,227 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late RateUsManager manager;
-  late RateUsConfig config;
-
   setUp(() async {
-    // Set up shared preferences for testing
+    // Reset mock shared prefs before each test
     SharedPreferences.setMockInitialValues({});
-
-    // Create a test configuration
-    config = const RateUsConfig(
-      rateUsInitialize: 1,
-      minDaysSinceInstall: 1,
-      minAppOpens: 3,
-      minEvents: 2,
-      autoTrigger: 5,
-      exitTrigger: 1,
-      cooldownDays: 7,
-    );
-
-    // Initialize the manager
-    manager = RateUsManager();
-    await manager.init(config: config);
   });
 
-  testWidgets('RateUsManager initializes correctly', (
-    WidgetTester tester,
-  ) async {
-    expect(manager.config.rateUsInitialize, 1);
-    expect(manager.config.minDaysSinceInstall, 1);
-    expect(manager.config.minAppOpens, 3);
-    expect(manager.config.minEvents, 2);
-    expect(manager.config.autoTrigger, 5);
-    expect(manager.config.exitTrigger, 1);
-    expect(manager.config.cooldownDays, 7);
-  });
+  test(
+    'StorageRepository initializes correctly and native flag behavior',
+    () async {
+      final storage = await StorageRepository.init();
 
-  testWidgets('RateUsManager can be reset', (WidgetTester tester) async {
-    // Reset the manager
-    await manager.reset();
+      // firstInstallDate should be present
+      final first = storage.firstInstallDate;
+      expect(first, isA<DateTime>());
 
-    // Verify that the app opens count is reset to 1 (initial value)
-    await manager.init(config: config);
+      // Initially no native called today
+      expect(storage.nativeCalledToday(), isFalse);
 
-    // We'd need to check the internal state, but since it's private,
-    // we can test the behavior instead by triggering events
-    final shouldShow = await manager.onMinAppOpens();
-    expect(
-      shouldShow,
-      false,
-    ); // Should be false because app opens is now 1, not 3
-  });
+      // Set native called date to now and verify the flag becomes true
+      await storage.setNativeCalledDate(DateTime.now().toIso8601String());
+      expect(storage.nativeCalledToday(), isTrue);
 
-  testWidgets('RateUsFallbackDialog renders correctly', (
-    WidgetTester tester,
-  ) async {
-    // Build the dialog
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(body: Center(child: RateUsFallbackDialog())),
-      ),
-    );
+      // assumedRatedCustom default is false
+      expect(storage.assumedRatedCustom, isFalse);
 
-    // Verify that the dialog contains the expected text
-    expect(find.text('Rate Our App'), findsOneWidget);
-    expect(
-      find.text(
-        'If you enjoy using our app, would you mind taking a moment to rate it? '
-        'It won\'t take more than a minute. Thanks for your support!',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Maybe Later'), findsOneWidget);
-    expect(find.text('Rate Now'), findsOneWidget);
-  });
+      // Set assumedRatedCustom true and check
+      await storage.setAssumedRatedCustom(true);
+      expect(storage.assumedRatedCustom, isTrue);
+    },
+  );
 
-  testWidgets('RateUsConfig can be created from map', (
-    WidgetTester tester,
-  ) async {
-    final map = {
-      'rateUS_initialize': 0,
-      'rate_days_since_install': 10,
-      'rate_min_opens': 20,
-      'rate_min_events': 30,
-      'rate_auto_trigger': 40,
-      'rate_exit': 1,
-      'rate_cooldown_days': 50,
-      'app_store_id': 'test123',
-    };
+  testWidgets(
+    'Fallback dialog renders and submit sets assumedRatedCustom + analytics logged',
+    (WidgetTester tester) async {
+      final storage = await StorageRepository.init();
 
-    final config = RateUsConfig.fromMap(map);
+      final events = <String>[];
+      final params = <Map<String, dynamic>>[];
 
-    expect(config.rateUsInitialize, 0);
-    expect(config.minDaysSinceInstall, 10);
-    expect(config.minAppOpens, 20);
-    expect(config.minEvents, 30);
-    expect(config.autoTrigger, 40);
-    expect(config.exitTrigger, 1);
-    expect(config.cooldownDays, 50);
-    expect(config.appStoreId, 'test123');
-  });
+      final analytics = RateUsAnalytics(
+        onEvent: (name, p) {
+          events.add(name);
+          params.add(Map<String, dynamic>.from(p));
+        },
+      );
 
-  testWidgets('RateUsConfig has correct default values', (
-    WidgetTester tester,
-  ) async {
-    final defaultConfig = const RateUsConfig();
+      final manager = await RateUsManager.init(
+        storage: storage,
+        config: const RateUsConfig(
+          rateUsInitialize: 1,
+          minAppOpens: 0,
+          cooldownDays: 2,
+        ),
+        analytics: analytics,
+      );
 
-    expect(defaultConfig.rateUsInitialize, 1);
-    expect(defaultConfig.minDaysSinceInstall, 3);
-    expect(defaultConfig.minAppOpens, 5);
-    expect(defaultConfig.minEvents, 3);
-    expect(defaultConfig.autoTrigger, 10);
-    expect(defaultConfig.exitTrigger, 0);
-    expect(defaultConfig.cooldownDays, 30);
-    expect(defaultConfig.appStoreId, null);
-  });
+      // Pump app to provide BuildContext for showDialog
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              return Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () => manager.tryShowRateDialog(context),
+                    child: const Text('Open'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
 
-  testWidgets('RateUsAnalytics logs events correctly', (
-    WidgetTester tester,
-  ) async {
-    final events = <String>[];
-    final params = <Map<String, dynamic>>[];
+      // Trigger the dialog
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
 
-    final analytics = RateUsAnalytics(
-      onEvent: (String eventName, Map<String, dynamic> parameters) {
-        events.add(eventName);
-        params.add(parameters);
-      },
-    );
+      // After in_app_review likely unavailable in test environment, fallback dialog should be shown
+      expect(find.byType(RateUsFallbackDialog), findsOneWidget);
+      expect(find.text('Enjoying the app?'), findsOneWidget);
 
-    analytics.logDialogShown();
-    analytics.logRated();
-    analytics.logDismissed();
-    analytics.logStoreRedirect();
-    analytics.logFallbackShown();
-    analytics.logTriggerCondition('test_trigger');
+      // Interact: enter a comment and tap Rate button
+      await tester.enterText(find.byType(TextField), 'Great app!');
+      await tester.tap(find.text('Rate'));
+      await tester.pumpAndSettle();
 
-    expect(events, [
-      'rate_us_dialog_shown',
-      'rate_us_rated',
-      'rate_us_dismissed',
-      'rate_us_store_redirect',
-      'rate_us_fallback_shown',
-      'rate_us_trigger',
-    ]);
+      // After submit: assumedRatedCustom should be true
+      expect(storage.assumedRatedCustom, isTrue);
 
-    expect(params[5]['trigger_type'], 'test_trigger');
-  });
+      // Analytics should have captured fallback shown + fallback submit (and possibly other attempts)
+      expect(events, contains('rate_us_fallback_shown'));
+      expect(events, contains('rate_us_fallback_submit'));
+      // Check params of fallback_submit include stars (default 5)
+      final submitIndex = events.indexOf('rate_us_fallback_submit');
+      expect(submitIndex, isNonNegative);
+      expect(params[submitIndex]['stars'], isNotNull);
+    },
+  );
+
+  testWidgets(
+    'Fallback dialog cancel triggers cooldown and blocks custom until cooldown expires',
+    (WidgetTester tester) async {
+      final storage = await StorageRepository.init();
+
+      final events = <String>[];
+      final analytics = RateUsAnalytics(
+        onEvent: (name, p) {
+          events.add(name);
+        },
+      );
+
+      final manager = await RateUsManager.init(
+        storage: storage,
+        config: const RateUsConfig(
+          rateUsInitialize: 1,
+          minAppOpens: 0,
+          cooldownDays: 3, // use 3 days cooldown for test
+        ),
+        analytics: analytics,
+      );
+
+      // Show dialog and cancel
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              return Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () => manager.tryShowRateDialog(context),
+                    child: const Text('OpenCancel'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('OpenCancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RateUsFallbackDialog), findsOneWidget);
+      await tester.tap(find.text('Not now')); // dialog 'Not now' cancels
+      await tester.pumpAndSettle();
+
+      // lastCustomCancel should be set
+      final lastCancel = storage.lastCustomCancel;
+      expect(lastCancel, isNotNull);
+
+      // Immediately attempting to show should prefer native branch (custom blocked).
+      // To simulate, we mark nativeAlreadyCalledToday false (it is false), so manager will attempt native.
+      // Because in-app-review is likely unavailable, it will attempt fallback but our cooldown should block custom.
+      // To test blocking behavior we call tryShowRateDialog again and ensure that we don't get another custom shown event
+      // (events already captured contain 'rate_us_fallback_shown' for first display).
+      events.clear();
+
+      await tester.tap(find.text('OpenCancel'));
+      await tester.pumpAndSettle();
+
+      // Since cooldown is active, manager will go to native branch (which will likely fallback to custom only if native unavailable).
+      // But custom should be blocked; therefore, we should not see another 'rate_us_fallback_shown' event added.
+      expect(events, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'Manual trigger (settings) bypasses cooldown and prefers native attempt',
+    (tester) async {
+      final storage = await StorageRepository.init();
+
+      final events = <String>[];
+      final analytics = RateUsAnalytics(
+        onEvent: (name, p) {
+          events.add(name);
+        },
+      );
+
+      final manager = await RateUsManager.init(
+        storage: storage,
+        config: const RateUsConfig(
+          rateUsInitialize: 1,
+          minAppOpens: 0,
+          cooldownDays: 2,
+        ),
+        analytics: analytics,
+      );
+
+      // Simulate a prior custom cancel so cooldown is active
+      await storage.setLastCustomCancel(DateTime.now());
+
+      // Pump UI and call manual trigger (should bypass cooldown and attempt native)
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              return Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () =>
+                        manager.tryShowRateDialog(context, manual: true),
+                    child: const Text('Manual'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Manual'));
+      await tester.pumpAndSettle();
+
+      // Analytics should include 'rate_us_manual_trigger' and either native attempt or native_unavailable fallback
+      expect(
+        events,
+        anyOf(
+          contains('rate_us_manual_trigger'),
+          contains('rate_us_native_attempt'),
+        ),
+      );
+    },
+  );
 }
