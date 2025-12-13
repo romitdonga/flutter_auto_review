@@ -1,305 +1,406 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_auto_review/flutter_auto_review.dart';
+import 'package:rive/rive.dart';
 
-late RateUsManager rateManager;
-late StorageRepository storage;
+import 'app_logger.dart';
 
-/// Simple console to show analytics + debug logs.
-final ValueNotifier<List<String>> logs = ValueNotifier([]);
-
-void logMsg(String msg) {
-  final now = DateTime.now();
-  final t =
-      '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-  logs.value = [...logs.value, "[$t] $msg"];
-}
-
-/// ---------- MAIN ----------
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  storage = await StorageRepository.init();
-
-  rateManager = await RateUsManager.init(
-    storage: storage,
+  // Initialize Rate Us Manager
+  await RateUsManager().init(
     config: const RateUsConfig(
       rateUsInitialize: 1,
-      minAppOpens: 0,
+      minAppOpens: 2,
+      minEvents: 3,
+      autoTrigger: 10,
+      exitTrigger: 1,
       cooldownDays: 2,
-      appStoreId: null,
+      maxCustomPerDay: 3,
+      appStoreId: 'YOUR_APP_STORE_ID',
     ),
     analytics: RateUsAnalytics(
-      onEvent: (e, p) => logMsg("Analytics: $e -> $p"),
+      onEvent: (eventName, parameters) {
+        // Send to Firebase Analytics or your analytics provider
+        AppLogger.n('Analytics: $eventName', tag: 'GA4', data: parameters);
+      },
     ),
   );
 
-  logMsg("Demo App Started");
-  logMsg("Rate Manager Initialized");
-
-  runApp(const AutoReviewDemo());
+  runApp(const MyApp());
 }
 
-/// ------------------------------------------------------------
-/// DEMO APP
-/// ------------------------------------------------------------
-class AutoReviewDemo extends StatelessWidget {
-  const AutoReviewDemo({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Auto Review Demo',
-      theme: ThemeData(useMaterial3: true),
-      home: const DemoHome(),
+      title: 'Rate Us Reformed Example',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
     );
   }
 }
 
-/// ------------------------------------------------------------
-/// MAIN SCREEN
-/// ------------------------------------------------------------
-class DemoHome extends StatefulWidget {
-  const DemoHome({super.key});
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<DemoHome> createState() => _DemoHomeState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _DemoHomeState extends State<DemoHome> {
-  Future<void> _appOpen() async {
-    logMsg("Trigger: onAppOpen()");
-    await rateManager.onAppOpen();
-    await rateManager.tryShowRateDialog(context);
-    setState(() {});
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  final RateUsManager _manager = RateUsManager();
+  int _customEvents = 0;
+  int _screenTransitions = 0;
+  RateUsState? _currentState;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkAppOpenTrigger();
+    _loadCurrentState();
   }
 
-  Future<void> _genericTrigger() async {
-    logMsg("Trigger: tryShowRateDialog()");
-    await rateManager.tryShowRateDialog(context);
-    setState(() {});
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
-  Future<void> _manualTrigger() async {
-    logMsg("Trigger: Manual Settings Trigger");
-    await rateManager.tryShowRateDialog(context, manual: true);
-    setState(() {});
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _manager.onAppExit(context);
+    }
   }
 
-  Future<void> _clearAssumedRated() async {
-    await storage.setAssumedRatedCustom(false);
-    logMsg("Reset: assumedRatedCustom = false");
-    setState(() {});
+  Future<void> _checkAppOpenTrigger() async {
+    await Future.delayed(const Duration(seconds: 1));
+    if (mounted) {
+      await _manager.onAppOpen(context);
+    }
   }
 
-  Future<void> _clearLastCancel() async {
-    await storage.setLastCustomCancel(DateTime.now());
-    logMsg("Reset: lastCustomCancel = null");
-    setState(() {});
+  Future<void> _loadCurrentState() async {
+    final state = await _manager.getState();
+    setState(() => _currentState = state);
   }
 
-  Future<void> _clearNativeDate() async {
-    await storage.setNativeCalledDate(DateTime.now().toIso8601String());
-    logMsg("Reset: nativeCallDate = null");
-    setState(() {});
+  Future<void> _simulateCustomEvent() async {
+    setState(() => _customEvents++);
+    await _manager.onCustomEvent(context);
+    await _loadCurrentState();
   }
 
-  Future<void> _incAppOpens() async {
-    await storage.incrementAppOpens();
-    logMsg("AppOpens++ -> ${storage.appOpens}");
-    setState(() {});
+  Future<void> _simulateScreenTransition() async {
+    setState(() => _screenTransitions++);
+    await _manager.onScreenTransition(context);
+    await _loadCurrentState();
+  }
+
+  Future<void> _resetManager() async {
+    await _manager.reset();
+    setState(() {
+      _customEvents = 0;
+      _screenTransitions = 0;
+      _currentState = null;
+    });
+    await _loadCurrentState();
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('✅ Manager reset complete')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Auto Review Demo")),
-      body: Column(
-        children: [
-          _buildStatePanel(),
-          _buildControls(),
-          Expanded(child: _buildConsole()),
-        ],
-      ),
-    );
-  }
-
-  /// ---------------------------------------------------------
-  /// STATE PANEL
-  /// ---------------------------------------------------------
-  Widget _buildStatePanel() {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      color: Colors.blueGrey.shade50,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Storage State",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 10,
-            children: [
-              _chip("appOpens: ${storage.appOpens}"),
-              _chip("customShown: ${storage.customShownCount}"),
-              _chip("assumedRated: ${storage.assumedRatedCustom}"),
-              _chip("lastCancel: ${storage.lastCustomCancel}"),
-              _chip("nativeCalled: ${storage.nativeCalledToday()}"),
-            ],
+      appBar: AppBar(
+        title: const Text('Rate Us Reformed'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              );
+            },
           ),
         ],
       ),
-    );
-  }
-
-  /// ---------------------------------------------------------
-  /// TRIGGER BUTTONS
-  /// ---------------------------------------------------------
-  Widget _buildControls() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Wrap(
-        spacing: 10,
-        children: [
-          _btn("App Open", _appOpen),
-          _btn("Generic Trigger", _genericTrigger),
-          _btn("Manual Trigger", _manualTrigger),
-          _btn("AppOpens++", _incAppOpens),
-          _btn("Reset Rated", _clearAssumedRated),
-          _btn("Reset Cancel", _clearLastCancel),
-          _btn("Reset Native", _clearNativeDate),
-        ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildStateCard(),
+            const SizedBox(height: 16),
+            _buildTriggerTestCard(),
+            const SizedBox(height: 16),
+            _buildControlsCard(),
+          ],
+        ),
       ),
     );
   }
 
-  /// ---------------------------------------------------------
-  /// LOG CONSOLE
-  /// ---------------------------------------------------------
-  Widget _buildConsole() {
-    return Container(
-      color: Colors.black,
-      child: ValueListenableBuilder(
-        valueListenable: logs,
-        builder: (_, list, __) {
-          return ListView.builder(
-            itemCount: list.length,
-            itemBuilder: (_, i) => Text(
-              list[i],
-              style: const TextStyle(
-                color: Colors.greenAccent,
-                fontSize: 13,
-                height: 1.3,
-              ),
+  Widget _buildStateCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '📊 Current State',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-          );
-        },
+            const SizedBox(height: 12),
+            if (_currentState != null) ...[
+              _buildStateRow(
+                'Native Called Today',
+                _currentState!.nativeCalledToday ? '✅' : '❌',
+              ),
+              _buildStateRow(
+                'Assumed Rated Custom',
+                _currentState!.assumedRatedCustom ? '✅' : '❌',
+              ),
+              _buildStateRow(
+                'In Cooldown',
+                _currentState!.isInCooldown ? '🔒' : '✅',
+              ),
+              _buildStateRow(
+                'Daily Custom Count',
+                '${_currentState!.dailyCustomCount}/3',
+              ),
+              _buildStateRow(
+                'Total Dismissals',
+                '${_currentState!.customDismissalCount}',
+              ),
+              _buildStateRow(
+                'First Install',
+                _formatDate(_currentState!.firstInstallDate),
+              ),
+              _buildStateRow(
+                'Last Native',
+                _formatDate(_currentState!.lastNativeAttemptDate),
+              ),
+              _buildStateRow(
+                'Last Custom',
+                _formatDate(_currentState!.lastCustomShownDate),
+              ),
+            ] else
+              const Center(child: CircularProgressIndicator()),
+          ],
+        ),
       ),
     );
   }
 
-  /// Small UI helpers
-  Widget _btn(String t, Future<void> Function() onTap) {
-    return ElevatedButton(onPressed: onTap, child: Text(t));
+  Widget _buildStateRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 14)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
-  Widget _chip(String t) {
-    return Chip(label: Text(t));
+  Widget _buildTriggerTestCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '🧪 Test Triggers',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Custom Events:'),
+                Text(
+                  '$_customEvents',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _simulateCustomEvent,
+              icon: const Icon(Icons.event),
+              label: const Text('Simulate Custom Event'),
+            ),
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Screen Transitions:'),
+                Text(
+                  '$_screenTransitions',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _simulateScreenTransition,
+              icon: const Icon(Icons.screen_rotation),
+              label: const Text('Simulate Screen Change'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '🎮 Controls',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => _manager.onSettingsTrigger(context),
+              icon: const Icon(Icons.star),
+              label: const Text('Manual Rate Trigger'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _resetManager,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reset Manager'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return 'Never';
+    return '${date.day}/${date.month} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 }
 
-// void main() async {
-//   WidgetsFlutterBinding.ensureInitialized();
-//   final storage = await StorageRepository.init();
-//   final manager = await RateUsManager.init(
-//     storage: storage,
-//     config: const RateUsConfig(
-//       rateUsInitialize: 1,
-//       minAppOpens: 0,
-//       cooldownDays: 2,
-//       appStoreId: null,
-//     ),
-//     analytics: RateUsAnalytics(
-//       onEvent: (name, params) {
-//         // FirebaseAnalytics.instance.log(name: eventName, parameters: parameters);
-//         debugPrint('GA4 EVENT: $name -> $params');
-//       },
-//     ),
-//   );
-//   runApp(MyApp(manager: manager, storage: storage));
-// }
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
 
-// class MyApp extends StatelessWidget {
-//   final RateUsManager manager;
-//   final StorageRepository storage;
-//   const MyApp({super.key, required this.manager, required this.storage});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.star),
+            title: const Text('Rate Our App'),
+            subtitle: const Text('Help us grow with your review'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => RateUsManager().onSettingsTrigger(context),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.info),
+            title: const Text('About'),
+            subtitle: const Text('Version 2.0.0 - Reformed'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-//   @override
-//   Widget build(BuildContext context) {
-//     return Provider.value(
-//       value: manager,
-//       child: MaterialApp(title: 'Auto Review Demo', home: HomeScreen()),
-//     );
-//   }
-// }
+class ExampleEvents extends StatefulWidget {
+  const ExampleEvents({super.key});
 
-// class HomeScreen extends StatefulWidget {
-//   const HomeScreen({super.key});
+  @override
+  State<ExampleEvents> createState() => _ExampleEventsState();
+}
 
-//   @override
-//   State<HomeScreen> createState() => _HomeScreenState();
-// }
+class _ExampleEventsState extends State<ExampleEvents> {
+  File? _riveFile;
+  RiveWidgetController? _controller;
 
-// class _HomeScreenState extends State<HomeScreen> {
-//   RateUsManager? manager;
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
 
-//   @override
-//   void didChangeDependencies() {
-//     super.didChangeDependencies();
-//     manager ??= Provider.of<RateUsManager>(context);
-//   }
+  Future<void> _init() async {
+    _riveFile = await File.asset(
+      'packages/flutter_auto_review/assets/rating.riv',
+      riveFactory: Factory.rive,
+    );
+    _controller = RiveWidgetController(_riveFile!);
+    _controller?.stateMachine.addEventListener(_onRiveEvent);
+    setState(() {});
+  }
 
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('Auto Review Demo'),
-//         actions: [
-//           IconButton(
-//             icon: const Icon(Icons.star),
-//             onPressed: () => manager?.tryShowRateDialog(context, manual: true),
-//             tooltip: 'Rate (manual)',
-//           ),
-//         ],
-//       ),
-//       body: ListView(
-//         padding: const EdgeInsets.all(16),
-//         children: [
-//           const Text('Tap buttons to simulate triggers and flows'),
-//           const SizedBox(height: 12),
-//           ElevatedButton(
-//             onPressed: () async {
-//               await manager?.onAppOpen();
-//               await manager?.tryShowRateDialog(context);
-//             },
-//             child: const Text('Simulate App Open Trigger'),
-//           ),
-//           const SizedBox(height: 8),
-//           ElevatedButton(
-//             onPressed: () => manager?.tryShowRateDialog(context),
-//             child: const Text('Simulate Generic Trigger'),
-//           ),
-//           const SizedBox(height: 8),
-//           ElevatedButton(
-//             onPressed: () async {
-//               await manager?.tryShowRateDialog(context, manual: true);
-//             },
-//             child: const Text('Manual Settings Trigger'),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
+  String ratingValue = 'Rating: 0';
+
+  void _onRiveEvent(Event event) {
+    // Access custom properties defined on the event
+    print(event);
+    var rating = event.numberProperty('rating')?.value ?? 0;
+    setState(() {
+      ratingValue = 'Rating: $rating';
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.stateMachine.removeEventListener(_onRiveEvent);
+    _controller?.stateMachine.dispose();
+    _riveFile?.dispose();
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 200,
+          child: _riveFile == null
+              ? const SizedBox()
+              : RiveWidget(controller: _controller!, fit: Fit.cover),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text(
+            ratingValue,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}

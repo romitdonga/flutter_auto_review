@@ -1,55 +1,46 @@
-/// A callback function type for handling analytics events
+import '../enums/trigger_type.dart';
+
 typedef AnalyticsCallback =
     void Function(String eventName, Map<String, dynamic> parameters);
 
-/// Analytics events for the rate us dialog
 class RateUsAnalytics {
-  /// Callback function for handling analytics events
   final AnalyticsCallback? onEvent;
 
-  /// Creates a new RateUsAnalytics instance
   const RateUsAnalytics({this.onEvent});
 
-  /// Logs an event with the given name and parameters
-  void log(String eventName, [Map<String, dynamic>? parameters]) {
-    final callback = onEvent;
-    if (callback != null) {
-      callback(eventName, parameters ?? {});
-    }
+  void logEvent(String eventName, [Map<String, dynamic>? parameters]) {
+    onEvent?.call(eventName, parameters ?? {});
   }
 
-  /// Logs when the rate us dialog is shown
-  void logDialogShown() {
-    log('rate_us_dialog_shown');
-  }
+  // Gate events
+  void logGate1Failed() =>
+      logEvent('rate_us_gate_1_failed', {'reason': 'feature_disabled'});
+  void logGate2Bypass() =>
+      logEvent('rate_us_gate_2_bypass', {'reason': 'already_rated_custom'});
+  void logGate3Cooldown() =>
+      logEvent('rate_us_gate_3_cooldown', {'reason': 'in_cooldown'});
+  void logGate4NativeToday() => logEvent('rate_us_gate_4_native_today', {
+    'reason': 'native_already_called',
+  });
 
-  /// Logs when the user rates the app
-  void logRated() {
-    log('rate_us_rated');
-  }
+  // Dialog events
+  void logNativeCalled(TriggerType trigger) =>
+      logEvent('rate_us_native_called', {'trigger': trigger.analyticsName});
+  void logNativeFailed(String reason) =>
+      logEvent('rate_us_native_failed', {'reason': reason});
+  void logCustomShown(TriggerType trigger) =>
+      logEvent('rate_us_custom_shown', {'trigger': trigger.analyticsName});
+  void logCustomSubmit(int stars) =>
+      logEvent('rate_us_custom_submit', {'stars': stars});
+  void logCustomDismiss() => logEvent('rate_us_custom_dismiss');
+  void logPlayStoreRedirect() => logEvent('rate_us_playstore_redirect');
 
-  /// Logs when the user dismisses the rate us dialog
-  void logDismissed() {
-    log('rate_us_dismissed');
-  }
+  // Trigger events
+  void logTrigger(TriggerType type) =>
+      logEvent('rate_us_trigger', {'type': type.analyticsName});
 
-  /// Logs when the user is redirected to the store
-  void logStoreRedirect() {
-    log('rate_us_store_redirect');
-  }
-
-  /// Logs when the fallback dialog is shown
-  void logFallbackShown() {
-    log('rate_us_fallback_shown');
-  }
-
-  /// Logs when a trigger condition is met
-  void logTriggerCondition(String triggerType) {
-    log('rate_us_trigger', {'trigger_type': triggerType});
-  }
-
-  /// Logs when the rate us feature is initialized
-  void logInitialized(Map<String, dynamic> config) {
-    log('rate_us_initialized', config);
-  }
+  // System events
+  void logInitialized(Map<String, dynamic> config) =>
+      logEvent('rate_us_initialized', config);
+  void logDailyReset() => logEvent('rate_us_daily_reset');
 }
