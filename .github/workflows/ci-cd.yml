@@ -24,9 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: '3.38.0'
   JAVA_VERSION: '17'
-  
+
 jobs:
   # ==================== JOB 1: Setup & Validation ====================
   setup:
@@ -45,11 +44,17 @@ jobs:
       - name: 🔍 Detect Flutter Version
         id: flutter-version
         run: |
-          if [ -f "example/pubspec.yaml" ]; then
-            VERSION=$(grep 'sdk:' example/pubspec.yaml | head -1 | sed 's/.*[>=^~]\([0-9.]*\).*/\1/')
-            echo "version=${VERSION:-${{ env.FLUTTER_VERSION }}}" >> $GITHUB_OUTPUT
+          # Check root pubspec.yaml for SDK constraint
+          if [ -f "pubspec.yaml" ]; then
+            # Extract SDK version (e.g., ">=3.10.0 <4.0.0" -> "3.10.0")
+            SDK_CONSTRAINT=$(grep -A1 'environment:' pubspec.yaml | grep 'sdk:' | sed "s/.*'>='//;s/' .*//" | head -1)
+            if [ -n "$SDK_CONSTRAINT" ]; then
+              echo "version=$SDK_CONSTRAINT" >> $GITHUB_OUTPUT
+            else
+              echo "version=3.38.0" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "version=${{ env.FLUTTER_VERSION }}" >> $GITHUB_OUTPUT
+            echo "version=3.38.0" >> $GITHUB_OUTPUT
           fi
       
       - name: 🔑 Generate Cache Key
@@ -98,7 +103,6 @@ jobs:
       - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.0'
           channel: 'stable'
           cache: true
           cache-key: ${{ needs.setup.outputs.cache-key }}
