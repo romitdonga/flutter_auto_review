@@ -43,7 +43,7 @@ class AppLogger {
   static const String _resetColor = '\x1B[0m';
   static const String _boldColor = '\x1B[1m';
 
-  static bool enableLogsInDebug = true;
+  static bool enableLogsInDebug = false;
   static bool enableLogsInRelease = false; // 🔒 PRODUCTION LOCK
   static LogLevel minimumLogLevel = LogLevel.debug;
 

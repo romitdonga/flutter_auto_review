@@ -1,0 +1,428 @@
+# name: 🚀 Flutter APK Build Pipeline
+
+# on:
+#   push:
+#     branches: [ main, develop ]
+#   pull_request:
+#     branches: [ main ]
+#   workflow_dispatch:
+#     inputs:
+#       build_type:
+#         description: 'Build Type'
+#         required: true
+#         default: 'all'
+#         type: choice
+#         options:
+#           - all
+#           - debug
+#           - release
+#           - bundle
+
+# # Cancel in-progress runs for the same workflow
+# concurrency:
+#   group: ${{ github.workflow }}-${{ github.ref }}
+#   cancel-in-progress: true
+
+# env:
+#   FLUTTER_VERSION: '3.27.3'
+#   JAVA_VERSION: '17'
+  
+# jobs:
+#   # ==================== JOB 1: Setup & Validation ====================
+#   setup:
+#     name: 📦 Setup & Validation
+#     runs-on: ubuntu-latest
+#     outputs:
+#       flutter-version: ${{ steps.flutter-version.outputs.version }}
+#       cache-key: ${{ steps.cache-key.outputs.key }}
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+      
+#       - name: 🔍 Detect Flutter Version
+#         id: flutter-version
+#         run: |
+#           if [ -f "example/pubspec.yaml" ]; then
+#             VERSION=$(grep 'sdk:' example/pubspec.yaml | head -1 | sed 's/.*[>=^~]\([0-9.]*\).*/\1/')
+#             echo "version=${VERSION:-${{ env.FLUTTER_VERSION }}}" >> $GITHUB_OUTPUT
+#           else
+#             echo "version=${{ env.FLUTTER_VERSION }}" >> $GITHUB_OUTPUT
+#           fi
+      
+#       - name: 🔑 Generate Cache Key
+#         id: cache-key
+#         run: |
+#           PUBSPEC_HASH=$(sha256sum example/pubspec.lock | awk '{print $1}')
+#           echo "key=flutter-${{ runner.os }}-${{ steps.flutter-version.outputs.version }}-${PUBSPEC_HASH:0:8}" >> $GITHUB_OUTPUT
+      
+#       - name: ✅ Validate pubspec.yaml
+#         run: |
+#           cd example
+#           if ! grep -q "name:" pubspec.yaml; then
+#             echo "❌ Invalid pubspec.yaml"
+#             exit 1
+#           fi
+#           echo "✅ pubspec.yaml is valid"
+      
+#       - name: 📊 Print Configuration
+#         run: |
+#           echo "🔹 Flutter Version: ${{ steps.flutter-version.outputs.version }}"
+#           echo "🔹 Cache Key: ${{ steps.cache-key.outputs.key }}"
+#           echo "🔹 Example Path: example/"
+
+
+#   # ==================== JOB 2: Build Debug APK ====================
+#   build-debug:
+#     name: 🛠️ Build Debug APK
+#     runs-on: ubuntu-latest
+#     needs: setup
+#     if: |
+#       github.event_name != 'workflow_dispatch' || 
+#       github.event.inputs.build_type == 'all' || 
+#       github.event.inputs.build_type == 'debug'
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+      
+#       - name: ☕ Setup Java
+#         uses: actions/setup-java@v4
+#         with:
+#           distribution: 'zulu'
+#           java-version: ${{ env.JAVA_VERSION }}
+#           cache: 'gradle'
+      
+#       - name: 🐦 Setup Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           flutter-version: ${{ needs.setup.outputs.flutter-version }}
+#           channel: 'stable'
+#           cache: true
+#           cache-key: ${{ needs.setup.outputs.cache-key }}
+#           cache-path: ${{ runner.tool_cache }}/flutter
+      
+#       - name: 📦 Get Dependencies (Root Package)
+#         run: |
+#           flutter pub get
+#           flutter --version
+      
+#       - name: 📦 Get Dependencies (Example)
+#         working-directory: example
+#         run: |
+#           flutter pub get
+#           flutter pub upgrade
+      
+#       - name: 🔨 Build Debug APK
+#         working-directory: example
+#         run: |
+#           flutter build apk --debug \
+#             --target-platform android-arm64 \
+#             --verbose
+      
+#       - name: 📊 APK Info
+#         working-directory: example
+#         run: |
+#           ls -lh build/app/outputs/flutter-apk/
+#           FILE_SIZE=$(du -h build/app/outputs/flutter-apk/app-debug.apk | cut -f1)
+#           echo "📦 Debug APK Size: $FILE_SIZE"
+#           echo "DEBUG_APK_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+      
+#       - name: 📤 Upload Debug APK
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: debug-apk-${{ github.sha }}
+#           path: example/build/app/outputs/flutter-apk/app-debug.apk
+#           retention-days: 7
+#           compression-level: 0
+
+
+#   # ==================== JOB 3: Build Release APK ====================
+#   build-release:
+#     name: 🚀 Build Release APK
+#     runs-on: ubuntu-latest
+#     needs: setup
+#     if: |
+#       github.event_name != 'workflow_dispatch' || 
+#       github.event.inputs.build_type == 'all' || 
+#       github.event.inputs.build_type == 'release'
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+      
+#       - name: ☕ Setup Java
+#         uses: actions/setup-java@v4
+#         with:
+#           distribution: 'zulu'
+#           java-version: ${{ env.JAVA_VERSION }}
+#           cache: 'gradle'
+      
+#       - name: 🐦 Setup Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           flutter-version: ${{ needs.setup.outputs.flutter-version }}
+#           channel: 'stable'
+#           cache: true
+#           cache-key: ${{ needs.setup.outputs.cache-key }}
+#           cache-path: ${{ runner.tool_cache }}/flutter
+      
+#       - name: 📦 Get Dependencies (Root Package)
+#         run: |
+#           flutter pub get
+#           flutter --version
+      
+#       - name: 📦 Get Dependencies (Example)
+#         working-directory: example
+#         run: |
+#           flutter pub get
+#           flutter pub upgrade
+      
+#       - name: 🔨 Build Release APK (Split per ABI)
+#         working-directory: example
+#         run: |
+#           flutter build apk --release \
+#             --split-per-abi \
+#             --obfuscate \
+#             --split-debug-info=build/app/outputs/symbols \
+#             --verbose
+      
+#       - name: 📊 APK Info
+#         working-directory: example
+#         run: |
+#           echo "📦 Generated APKs:"
+#           ls -lh build/app/outputs/flutter-apk/*.apk
+          
+#           ARM64_SIZE=$(du -h build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | cut -f1)
+#           ARMEABI_SIZE=$(du -h build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk | cut -f1)
+#           X86_64_SIZE=$(du -h build/app/outputs/flutter-apk/app-x86_64-release.apk | cut -f1)
+          
+#           echo "📦 ARM64 APK: $ARM64_SIZE"
+#           echo "📦 ARMv7 APK: $ARMEABI_SIZE"
+#           echo "📦 x86_64 APK: $X86_64_SIZE"
+          
+#           echo "ARM64_APK_SIZE=$ARM64_SIZE" >> $GITHUB_ENV
+      
+#       - name: 📤 Upload Release APKs
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: release-apks-${{ github.sha }}
+#           path: |
+#             example/build/app/outputs/flutter-apk/app-*-release.apk
+#             example/build/app/outputs/symbols/
+#           retention-days: 30
+#           compression-level: 0
+
+
+#   # ==================== JOB 4: Build App Bundle (AAB) ====================
+#   build-bundle:
+#     name: 📦 Build App Bundle
+#     runs-on: ubuntu-latest
+#     needs: setup
+#     if: |
+#       github.event_name != 'workflow_dispatch' || 
+#       github.event.inputs.build_type == 'all' || 
+#       github.event.inputs.build_type == 'bundle'
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+      
+#       - name: ☕ Setup Java
+#         uses: actions/setup-java@v4
+#         with:
+#           distribution: 'zulu'
+#           java-version: ${{ env.JAVA_VERSION }}
+#           cache: 'gradle'
+      
+#       - name: 🐦 Setup Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           flutter-version: ${{ needs.setup.outputs.flutter-version }}
+#           channel: 'stable'
+#           cache: true
+#           cache-key: ${{ needs.setup.outputs.cache-key }}
+#           cache-path: ${{ runner.tool_cache }}/flutter
+      
+#       - name: 📦 Get Dependencies (Root Package)
+#         run: |
+#           flutter pub get
+      
+#       - name: 📦 Get Dependencies (Example)
+#         working-directory: example
+#         run: |
+#           flutter pub get
+#           flutter pub upgrade
+      
+#       - name: 🔨 Build App Bundle
+#         working-directory: example
+#         run: |
+#           flutter build appbundle --release \
+#             --obfuscate \
+#             --split-debug-info=build/app/outputs/symbols \
+#             --verbose
+      
+#       - name: 📊 Bundle Info
+#         working-directory: example
+#         run: |
+#           ls -lh build/app/outputs/bundle/release/
+#           BUNDLE_SIZE=$(du -h build/app/outputs/bundle/release/app-release.aab | cut -f1)
+#           echo "📦 App Bundle Size: $BUNDLE_SIZE"
+#           echo "BUNDLE_SIZE=$BUNDLE_SIZE" >> $GITHUB_ENV
+      
+#       - name: 📤 Upload App Bundle
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: app-bundle-${{ github.sha }}
+#           path: |
+#             example/build/app/outputs/bundle/release/app-release.aab
+#             example/build/app/outputs/symbols/
+#           retention-days: 90
+#           compression-level: 0
+
+
+#   # ==================== JOB 5: Analyze & Test ====================
+#   analyze-test:
+#     name: 🔍 Analyze & Test
+#     runs-on: ubuntu-latest
+#     needs: setup
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+      
+#       - name: 🐦 Setup Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           flutter-version: ${{ needs.setup.outputs.flutter-version }}
+#           channel: 'stable'
+#           cache: true
+#           cache-key: ${{ needs.setup.outputs.cache-key }}
+      
+#       - name: 📦 Get Dependencies
+#         run: |
+#           flutter pub get
+#           cd example && flutter pub get
+      
+#       - name: 🔍 Analyze Package
+#         run: |
+#           flutter analyze --no-fatal-infos
+      
+#       - name: 🔍 Analyze Example
+#         working-directory: example
+#         run: |
+#           flutter analyze --no-fatal-infos
+      
+#       - name: 🧪 Run Tests (if any)
+#         run: |
+#           if [ -d "test" ]; then
+#             flutter test --coverage
+#           else
+#             echo "⚠️ No tests found"
+#           fi
+
+
+#   # ==================== JOB 6: Create Release ====================
+#   create-release:
+#     name: 🎉 Create GitHub Release
+#     runs-on: ubuntu-latest
+#     needs: [build-debug, build-release, build-bundle]
+#     if: |
+#       github.event_name == 'push' && 
+#       github.ref == 'refs/heads/main' &&
+#       (github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'all')
+#     permissions:
+#       contents: write
+    
+#     steps:
+#       - name: 📥 Checkout Repository
+#         uses: actions/checkout@v4
+      
+#       - name: 📦 Get Version from pubspec.yaml
+#         id: version
+#         working-directory: example
+#         run: |
+#           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+#           echo "version=$VERSION" >> $GITHUB_OUTPUT
+#           echo "📌 Version: $VERSION"
+      
+#       - name: 📥 Download All Artifacts
+#         uses: actions/download-artifact@v4
+#         with:
+#           path: artifacts
+      
+#       - name: 📊 List Artifacts
+#         run: |
+#           echo "📦 Downloaded Artifacts:"
+#           find artifacts -type f -name "*.apk" -o -name "*.aab"
+      
+#       - name: 🏷️ Create Release
+#         uses: softprops/action-gh-release@v2
+#         with:
+#           tag_name: v${{ steps.version.outputs.version }}-build-${{ github.run_number }}
+#           name: Release v${{ steps.version.outputs.version }} (Build ${{ github.run_number }})
+#           body: |
+#             ## 🚀 Flutter Auto Review - Build ${{ github.run_number }}
+            
+#             **Version:** ${{ steps.version.outputs.version }}
+#             **Commit:** ${{ github.sha }}
+#             **Branch:** ${{ github.ref_name }}
+#             **Build Date:** ${{ github.event.head_commit.timestamp }}
+            
+#             ### 📦 Downloads:
+#             - **Debug APK**: For testing and debugging
+#             - **Release APKs**: Optimized builds (ARM64, ARMv7, x86_64)
+#             - **App Bundle (AAB)**: For Google Play Store upload
+            
+#             ### 🔧 Changes:
+#             ${{ github.event.head_commit.message }}
+            
+#             ### 📝 Installation:
+#             1. Download the appropriate APK for your device
+#             2. Enable "Install from Unknown Sources" in Android settings
+#             3. Install the APK
+            
+#             ### ⚠️ Note:
+#             - Debug APK is larger and includes debugging symbols
+#             - Use ARM64 APK for modern devices (2016+)
+#             - Use App Bundle for Play Store submission
+#           draft: false
+#           prerelease: false
+#           files: |
+#             artifacts/debug-apk-${{ github.sha }}/app-debug.apk
+#             artifacts/release-apks-${{ github.sha }}/app-*-release.apk
+#             artifacts/app-bundle-${{ github.sha }}/app-release.aab
+#           token: ${{ secrets.GITHUB_TOKEN }}
+
+
+#   # ==================== JOB 7: Build Summary ====================
+#   build-summary:
+#     name: 📊 Build Summary
+#     runs-on: ubuntu-latest
+#     needs: [build-debug, build-release, build-bundle, analyze-test]
+#     if: always()
+    
+#     steps:
+#       - name: 📊 Generate Summary
+#         run: |
+#           echo "# 🎉 Build Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "## 📋 Job Status" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+#           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+#           echo "| Debug APK | ${{ needs.build-debug.result == 'success' && '✅ Success' || needs.build-debug.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+#           echo "| Release APKs | ${{ needs.build-release.result == 'success' && '✅ Success' || needs.build-release.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+#           echo "| App Bundle | ${{ needs.build-bundle.result == 'success' && '✅ Success' || needs.build-bundle.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+#           echo "| Analyze & Test | ${{ needs.analyze-test.result == 'success' && '✅ Success' || needs.analyze-test.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "## 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+#           echo "- Debug APK: \`debug-apk-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+#           echo "- Release APKs: \`release-apks-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+#           echo "- App Bundle: \`app-bundle-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "## 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+#           echo "- [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+#           echo "- [Commit Details](${{ github.event.head_commit.url }})" >> $GITHUB_STEP_SUMMARY
