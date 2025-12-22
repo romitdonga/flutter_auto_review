@@ -25,6 +25,7 @@ concurrency:
 
 env:
   JAVA_VERSION: '17'
+  FLUTTER_VERSION: '3.38.1'  # Match your local version
 
 jobs:
   # ==================== JOB 1: Setup & Validation ====================
@@ -44,24 +45,14 @@ jobs:
       - name: 🔍 Detect Flutter Version
         id: flutter-version
         run: |
-          # Check root pubspec.yaml for SDK constraint
-          if [ -f "pubspec.yaml" ]; then
-            # Extract SDK version (e.g., ">=3.10.0 <4.0.0" -> "3.10.0")
-            SDK_CONSTRAINT=$(grep -A1 'environment:' pubspec.yaml | grep 'sdk:' | sed "s/.*'>='//;s/' .*//" | head -1)
-            if [ -n "$SDK_CONSTRAINT" ]; then
-              echo "version=$SDK_CONSTRAINT" >> $GITHUB_OUTPUT
-            else
-              echo "version=3.38.0" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "version=3.38.0" >> $GITHUB_OUTPUT
-          fi
+          # Use environment variable or default
+          echo "version=${{ env.FLUTTER_VERSION }}" >> $GITHUB_OUTPUT
       
       - name: 🔑 Generate Cache Key
         id: cache-key
         run: |
           PUBSPEC_HASH=$(sha256sum example/pubspec.lock | awk '{print $1}')
-          echo "key=flutter-${{ runner.os }}-${{ steps.flutter-version.outputs.version }}-${PUBSPEC_HASH:0:8}" >> $GITHUB_OUTPUT
+          echo "key=flutter-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${PUBSPEC_HASH:0:8}" >> $GITHUB_OUTPUT
       
       - name: ✅ Validate pubspec.yaml
         run: |
@@ -74,7 +65,7 @@ jobs:
       
       - name: 📊 Print Configuration
         run: |
-          echo "🔹 Flutter Version: ${{ steps.flutter-version.outputs.version }}"
+          echo "🔹 Flutter Version: ${{ env.FLUTTER_VERSION }}"
           echo "🔹 Cache Key: ${{ steps.cache-key.outputs.key }}"
           echo "🔹 Example Path: example/"
 
@@ -103,7 +94,7 @@ jobs:
       - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.0'
+          flutter-version: ${{ needs.setup.outputs.flutter-version }}
           channel: 'stable'
           cache: true
           cache-key: ${{ needs.setup.outputs.cache-key }}
