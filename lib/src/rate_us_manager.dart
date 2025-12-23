@@ -286,6 +286,11 @@ class RateUsManager {
   }
 
   Future<void> onCustomEvent(BuildContext context) async {
+    if (!context.mounted) {
+      AppLogger.e('Context not mounted for custom event', tag: 'Manager');
+      return;
+    }
+
     await _repository.incrementCustomEvents();
     final events = await _repository.getCustomEvents();
 
@@ -321,13 +326,33 @@ class RateUsManager {
   }
 
   Future<void> onSettingsTrigger(BuildContext context) async {
+    if (!context.mounted) {
+      AppLogger.e('Context not mounted for settings trigger', tag: 'Manager');
+      return;
+    }
+
     AppLogger.section('MANUAL TRIGGER FROM SETTINGS');
 
-    await _callNativeDialog(TriggerType.manual);
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      await _callNativeDialog(TriggerType.manual);
 
-    if (context.mounted) {
-      await _showCustomDialog(context, TriggerType.manual);
+      if (!context.mounted) {
+        AppLogger.w('Context unmounted after native dialog', tag: 'Manager');
+        return;
+      }
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (context.mounted) {
+        await _showCustomDialog(context, TriggerType.manual);
+      }
+    } catch (e, stack) {
+      AppLogger.e(
+        'Settings trigger error',
+        tag: 'Manager',
+        error: e,
+        stackTrace: stack,
+      );
     }
   }
 
