@@ -420,7 +420,7 @@ MIT License - See LICENSE file
 
 ## 🙏 Credits
 
-Reformed by: [Your Name]
+Reformed by: [Romit Donga]
 Original package: flutter_auto_review v1.0
 Inspired by: Real-world analytics data (18 reviews → 150+ goal)
 
@@ -428,9 +428,9 @@ Inspired by: Real-world analytics data (18 reviews → 150+ goal)
 
 ## 📞 Support
 
-- 🐛 Issues: [GitHub Issues](https://github.com/your-repo/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/your-repo/discussions)
-- 📧 Email: support@yourpackage.com
+- 🐛 Issues: [GitHub Issues](https://github.com/romitdonga/flutter_auto_review/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/romitdonga/flutter_auto_review/discussions)
+- 📧 Email: dongaromit@gmail.com
 
 ---
 
